@@ -5,3 +5,5 @@ Such hardware (running this code as is) must be
 - RaspberryPi 3
 - Adafruit hat
 - Adafruit LED matrix board.
+
+# UNLESS YOU WANT TO GO THROUGH ALL THE FILES AND EDIT ALL THE DEPENDINCY'S ONLY CHANGE climate-clock-kit/clock/climateclock.py
