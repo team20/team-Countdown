@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+# ALL UNUSED IMPORTS ARE FOR THE COMENTED CODE! GO TO LINE 122 TO CHANGE THE TARGIT.
 import json
 import os
 import sys
@@ -9,13 +9,13 @@ from datetime import datetime, timezone, timedelta
 import config
 import requests
 from rgbmatrix import RGBMatrix, RGBMatrixOptions, graphics
-
+# THIS MISSING IMPORT IS NORMAL, CODE WILL BE COMPILED ON THE PI PROPERLY.
 # Added PIL to handle the Team 20 logo
 from PIL import Image
 
 EST = timezone(timedelta(hours=-5))
 
-
+# DO NOT UNCOMENT THIS CHUNK, THIS IS FROM THE ORIGINAL 2024 CODE.
 """
 TIME_COLOR = '#ffd919'
 TIME_ALT_COLOR = '#c8890a'
@@ -119,8 +119,8 @@ run(options)
 # NEW TEAM 20 CONSTANTS
 TEAM_COLOR = graphics.Color(0, 255, 0) # Green from logo
 TEXT_COLOR = graphics.Color(255, 255, 255) # White
-TARGET_DATE = datetime(2026, 3, 11, 0, 0, 0, tzinfo=EST)
-
+TARGET_DATE = datetime(2027, 1, 9, 12, 0, 0, 0, tzinfo=EST)
+# DONT CHANGE ANYTHING BELOW THIS UNLESS COMENTS SAY YOU SHOULD.
 relpath = lambda filename: os.path.join(sys.path[0], filename)
 
 def run(options):
