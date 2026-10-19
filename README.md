@@ -1,9 +1,9 @@
 # team 20 Countdown
-The code that allows the team 20 countdown to run. All commented code is the original creator's.
-The code should run on any Raspberry Pi 3 with the proper hardware.
-Such hardware (running this code as is) must be 
-- RaspberryPi 3
-- Adafruit hat
-- Adafruit LED matrix board.
+This code allows the Team 20 Countdown to run. All commented code is the original creator's.
+The code should run on any Raspberry Pi 3/4/5 with the proper hardware.
+The hardware (running this code as is) must be 
+- RaspberryPi 3/4/5
+- Adafruit Hat
+- Adafruit LED matrix board(s)
 
-# UNLESS YOU WANT TO GO THROUGH ALL THE FILES AND EDIT ALL THE DEPENDINCY'S ONLY CHANGE climate-clock-kit/clock/climateclock.py
+#To change the time, date and countdown change climate-clock-kit/clock/climateclock.py
