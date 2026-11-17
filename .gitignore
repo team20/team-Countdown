@@ -1,6 +1,11 @@
 __pycache__/
-*.pyc
+*.py[cod]
 climate-env/
 venv/
 .env
 .DS_Store
+
+.cache/
+.local/
+.config/
+rpi-rgb-led-matrix/
