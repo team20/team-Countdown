@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include <signal.h>
 
-using rgb_matrix::GPIO;
 using rgb_matrix::RGBMatrix;
 using rgb_matrix::Canvas;
 
@@ -37,9 +36,8 @@ static void DrawOnCanvas(Canvas *canvas) {
       return;
     float dot_x = cos(a * 2 * M_PI) * r;
     float dot_y = sin(a * 2 * M_PI) * r;
-    canvas->SetPixel(center_x + dot_x, center_y + dot_y,
-                     255, 0, 0);
-    usleep(1 * 1000);  // wait a little to slow down things.
+    canvas->SetPixel(center_x + dot_x, center_y + dot_y, 255, 0, 0);
+    usleep(1 * 1000); // wait a little to slow down things.
   }
 }
 
@@ -50,7 +48,7 @@ int main(int argc, char *argv[]) {
   defaults.chain_length = 1;
   defaults.parallel = 1;
   defaults.show_refresh_rate = true;
-  Canvas *canvas = rgb_matrix::CreateMatrixFromFlags(&argc, &argv, &defaults);
+  Canvas *canvas = RGBMatrix::CreateFromFlags(&argc, &argv, &defaults);
   if (canvas == NULL)
     return 1;
 

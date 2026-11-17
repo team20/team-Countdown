@@ -24,7 +24,7 @@ namespace rgb_matrix {
 // This abstraction also allows you to e.g. create delegating
 // implementations that do a particular transformation, e.g. re-map
 // pixels (as you might lay out the physical RGB matrix in a different way),
-// compose images (OR, XOR, transparecy), scale, rotate, anti-alias or
+// compose images (OR, XOR, transparency), scale, rotate, anti-alias or
 // translate coordinates in a funky way.
 //
 // It is a good idea to have your applications use the concept of
@@ -47,25 +47,6 @@ public:
   // Fill screen with given 24bpp color.
   virtual void Fill(uint8_t red, uint8_t green, uint8_t blue) = 0;
 };
-
-#ifndef REMOVE_DEPRECATED_TRANSFORMERS
-// Canvas Transformer used to be a way to map pixels in the LED matrix.
-// It was an overdesigned concept and required some confusing boilerplate
-// to set-up, but was too compilcated for what it was used for: mapping
-// pixels from some logical mapping to some physical mapping.
-//
-// These days, this is done by rgb_matrix::PixelMapper, see pixel-mapper.h
-//
-// Don't use CanvasTransformer in new code.
-class CanvasTransformer {
-public:
-  virtual ~CanvasTransformer() {}
-
-  // Return a Canvas* that applies transformations before delegating to
-  // the output canvas.
-  virtual Canvas *Transform(Canvas *output) = 0;
-};
-#endif
 
 }  // namespace rgb_matrix
 #endif  // RPI_CANVAS_H

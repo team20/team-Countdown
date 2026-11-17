@@ -6,7 +6,7 @@
 //
 // This is a grab-bag of various demos and not very readable.
 #include "led-matrix.h"
-#include "threaded-canvas-manipulator.h"
+
 #include "pixel-mapper.h"
 #include "graphics.h"
 
@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <random>
 
 using std::min;
 using std::max;
@@ -35,20 +36,151 @@ static void InterruptHandler(int signo) {
   interrupt_received = true;
 }
 
+class DemoRunner {
+protected:
+  DemoRunner(Canvas *canvas) : canvas_(canvas) {}
+  inline Canvas *canvas() { return canvas_; }
+
+public:
+  virtual ~DemoRunner() {}
+  virtual void Run() = 0;
+
+private:
+  Canvas *const canvas_;
+};
+
 /*
  * The following are demo image generators. They all use the utility
- * class ThreadedCanvasManipulator to generate new frames.
+ * class DemoRunner to generate new frames.
  */
 
-// Simple generator that pulses through RGB and White.
-class ColorPulseGenerator : public ThreadedCanvasManipulator {
+// Simple 3d wireframe generator
+class WireCube : public DemoRunner {
 public:
-  ColorPulseGenerator(RGBMatrix *m) : ThreadedCanvasManipulator(m), matrix_(m) {
+  WireCube(Canvas *m) : DemoRunner(m) {}
+
+  void Run() override 
+  {
+    while(!interrupt_received)
+    {
+      //you can define your own shape here if you want
+      //(x, y, z)
+      double verts[8*3] = {
+        -1,-1,-1, //0           1---------5         ^ +z
+        -1,-1, 1, //1          /|        /|         |
+        -1, 1,-1, //2         3-|-------7 |         |
+        -1, 1, 1, //3         | |       | |         |
+         1,-1,-1, //4         | |       | |         o--------> +x
+         1,-1, 1, //5         | 0---------4
+         1, 1,-1, //6         |/        |/
+         1, 1, 1  //7         2---------6
+      };
+
+      uint16_t edges[12*2] = {
+        0,1,  1,3,  3,2,  2,0,
+        0,4,  1,5,  2,6,  3,7,
+        4,5,  5,7,  7,6,  6,4,
+      };
+
+      // create smooth color transitions
+      int red = sin(freq*k + rad/3*1) * 128 + 127;
+      int grn = sin(freq*k + rad/3*2) * 128 + 127;
+      int blu = sin(freq*k + rad/3*3) * 128 + 127;
+
+      // draw complete mesh with rotated vertices and color
+      int vertSize = sizeof(verts)/sizeof(verts[0]);
+      int edgeSize = sizeof(edges)/sizeof(edges[0]);
+      drawMesh(rotate(verts,vertSize/3,k,k/3,k/2), edges, edgeSize/2, red, grn, blu);
+
+      // sleep and then clear canvas
+      usleep(20*1000);
+      canvas()->Fill(0,0,0);
+      k+=0.05;
+    }
+  }
+
+private:
+  FrameCanvas *off_screen_canvas_;
+
+  double k = 0;
+  double zoom = canvas()->width();
+  double freq = 0.1;    //color changing frequency
+  double camDist = 4.0; //distance the camera is to the wireframe
+  double pi = 3.14159265;
+  double rad = 2*pi;
+
+  void drawMesh(double verts[], uint16_t edges[],int edgeCnt, int r, int g, int b)
+  {
+    // get center of the matrix
+    const int cx = canvas()->width()/2;
+    const int cy = canvas()->height()/2; 
+
+    // for every edge
+    for (int i=0;i<edgeCnt*2;i+=2){
+
+      double xpoints[2] = {};
+      double zpoints[2] = {};
+      for (int j=0; j<2; j++) {
+        float x = verts[edges[i+j]*3+0];
+        float y = verts[edges[i+j]*3+1]+camDist;
+        float z = verts[edges[i+j]*3+2];
+        float f = zoom/y;
+        xpoints[j] = x*f;
+        zpoints[j] = z*f;
+      }
+
+      DrawLine(canvas(), cx+xpoints[0], cy+zpoints[0], cx+xpoints[1], cy+zpoints[1], Color(r, g, b));
+    }
+  }
+
+  //3d rotation
+  //https://stackoverflow.com/questions/34050929/3d-point-rotation-algorithm
+  double *rotate(double *v, int len, double rX, double rY, double rZ)
+  {
+    double cosa = cos(rZ);
+    double sina = sin(rZ);
+
+    double cosb = cos(rY);
+    double sinb = sin(rY);
+
+    double cosc = cos(rX);
+    double sinc = sin(rX);
+
+    double Axx = cosa*cosb;
+    double Axy = cosa*sinb*sinc - sina*cosc;
+    double Axz = cosa*sinb*cosc + sina*sinc;
+
+    double Ayx = sina*cosb;
+    double Ayy = sina*sinb*sinc + cosa*cosc;
+    double Ayz = sina*sinb*cosc - cosa*sinc;
+
+    double Azx = -sinb;
+    double Azy = cosb*sinc;
+    double Azz = cosb*cosc;
+
+    for (int i=0;i<len*3;i+=3)
+    {
+      double px = v[i+0];
+      double py = v[i+1];
+      double pz = v[i+2];
+
+      v[i+0] = Axx*px + Axy*py + Axz*pz;
+      v[i+1] = Ayx*px + Ayy*py + Ayz*pz;
+      v[i+2] = Azx*px + Azy*py + Azz*pz;
+    }	
+    return v;
+  }
+};
+
+// Simple generator that pulses through RGB and White.
+class ColorPulseGenerator : public DemoRunner {
+public:
+  ColorPulseGenerator(RGBMatrix *m) : DemoRunner(m), matrix_(m) {
     off_screen_canvas_ = m->CreateFrameCanvas();
   }
-  void Run() {
+  void Run() override {
     uint32_t continuum = 0;
-    while (running() && !interrupt_received) {
+    while (!interrupt_received) {
       usleep(5 * 1000);
       continuum += 1;
       continuum %= 3 * 255;
@@ -77,16 +209,16 @@ private:
 };
 
 // Simple generator that pulses through brightness on red, green, blue and white
-class BrightnessPulseGenerator : public ThreadedCanvasManipulator {
+class BrightnessPulseGenerator : public DemoRunner {
 public:
   BrightnessPulseGenerator(RGBMatrix *m)
-    : ThreadedCanvasManipulator(m), matrix_(m) {}
-  void Run() {
+    : DemoRunner(m), matrix_(m) {}
+  void Run() override {
     const uint8_t max_brightness = matrix_->brightness();
     const uint8_t c = 255;
     uint8_t count = 0;
 
-    while (running() && !interrupt_received) {
+    while (!interrupt_received) {
       if (matrix_->brightness() < 1) {
         matrix_->SetBrightness(max_brightness);
         count++;
@@ -109,35 +241,38 @@ private:
   RGBMatrix *const matrix_;
 };
 
-class SimpleSquare : public ThreadedCanvasManipulator {
+class SimpleSquare : public DemoRunner {
 public:
-  SimpleSquare(Canvas *m) : ThreadedCanvasManipulator(m) {}
-  void Run() {
+  SimpleSquare(Canvas *m) : DemoRunner(m) {}
+  void Run() override {
     const int width = canvas()->width() - 1;
     const int height = canvas()->height() - 1;
-    // Borders
-    DrawLine(canvas(), 0, 0,      width, 0,      Color(255, 0, 0));
-    DrawLine(canvas(), 0, height, width, height, Color(255, 255, 0));
-    DrawLine(canvas(), 0, 0,      0,     height, Color(0, 0, 255));
-    DrawLine(canvas(), width, 0,  width, height, Color(0, 255, 0));
 
-    // Diagonals.
-    DrawLine(canvas(), 0, 0,        width, height, Color(255, 255, 255));
-    DrawLine(canvas(), 0, height, width, 0,        Color(255,   0, 255));
+    while (!interrupt_received) {
+      // Borders
+      DrawLine(canvas(), 0, 0,      width, 0,      Color(255, 0, 0));
+      DrawLine(canvas(), 0, height, width, height, Color(255, 255, 0));
+      DrawLine(canvas(), 0, 0,      0,     height, Color(0, 0, 255));
+      DrawLine(canvas(), width, 0,  width, height, Color(0, 255, 0));
+
+      // Diagonals.
+      DrawLine(canvas(), 0, 0,        width, height, Color(255, 255, 255));
+      DrawLine(canvas(), 0, height, width, 0,        Color(255,   0, 255));
+    }
   }
 };
 
-class GrayScaleBlock : public ThreadedCanvasManipulator {
+class GrayScaleBlock : public DemoRunner {
 public:
-  GrayScaleBlock(Canvas *m) : ThreadedCanvasManipulator(m) {}
-  void Run() {
+  GrayScaleBlock(Canvas *m) : DemoRunner(m) {}
+  void Run() override {
     const int sub_blocks = 16;
     const int width = canvas()->width();
     const int height = canvas()->height();
     const int x_step = max(1, width / sub_blocks);
     const int y_step = max(1, height / sub_blocks);
     uint8_t count = 0;
-    while (running() && !interrupt_received) {
+    while (!interrupt_received) {
       for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
           int c = sub_blocks * (y / y_step) + x / x_step;
@@ -156,9 +291,9 @@ public:
 };
 
 // Simple class that generates a rotating block on the screen.
-class RotatingBlockGenerator : public ThreadedCanvasManipulator {
+class RotatingBlockGenerator : public DemoRunner {
 public:
-  RotatingBlockGenerator(Canvas *m) : ThreadedCanvasManipulator(m) {}
+  RotatingBlockGenerator(Canvas *m) : DemoRunner(m) {}
 
   uint8_t scale_col(int val, int lo, int hi) {
     if (val < lo) return 0;
@@ -166,12 +301,12 @@ public:
     return 255 * (val - lo) / (hi - lo);
   }
 
-  void Run() {
+  void Run() override {
     const int cent_x = canvas()->width() / 2;
     const int cent_y = canvas()->height() / 2;
 
     // The square to rotate (inner square + black frame) needs to cover the
-    // whole area, even if diagnoal. Thus, when rotating, the outer pixels from
+    // whole area, even if diagonal. Thus, when rotating, the outer pixels from
     // the previous frame are cleared.
     const int rotate_square = min(canvas()->width(), canvas()->height()) * 1.41;
     const int min_rotate = cent_x - rotate_square / 2;
@@ -184,7 +319,7 @@ public:
 
     const float deg_to_rad = 2 * 3.14159265 / 360;
     int rotation = 0;
-    while (running() && !interrupt_received) {
+    while (!interrupt_received) {
       ++rotation;
       usleep(15 * 1000);
       rotation %= 360;
@@ -216,27 +351,22 @@ private:
   }
 };
 
-class ImageScroller : public ThreadedCanvasManipulator {
+class ImageScroller : public DemoRunner {
 public:
   // Scroll image with "scroll_jumps" pixels every "scroll_ms" milliseconds.
   // If "scroll_ms" is negative, don't do any scrolling.
   ImageScroller(RGBMatrix *m, int scroll_jumps, int scroll_ms = 30)
-    : ThreadedCanvasManipulator(m), scroll_jumps_(scroll_jumps),
+    : DemoRunner(m), scroll_jumps_(scroll_jumps),
       scroll_ms_(scroll_ms),
       horizontal_position_(0),
       matrix_(m) {
     offscreen_ = matrix_->CreateFrameCanvas();
   }
 
-  virtual ~ImageScroller() {
-    Stop();
-    WaitStopped();   // only now it is safe to delete our instance variables.
-  }
-
   // _very_ simplified. Can only read binary P6 PPM. Expects newlines in headers
   // Not really robust. Use at your own risk :)
   // This allows reload of an image while things are running, e.g. you can
-  // life-update the content.
+  // live-update the content.
   bool LoadPPM(const char *filename) {
     FILE *f = fopen(filename, "r");
     // check if file exists
@@ -259,7 +389,7 @@ public:
     line = ReadLine(f, header_buf, sizeof(header_buf));
     if (!line || sscanf(line, "%d ", &value) != 1 || value != 255)
       EXIT_WITH_MSG("Only 255 for maxval allowed.");
-    const size_t pixel_count = new_width * new_height;
+    const size_t pixel_count = (size_t)new_width * (size_t)new_height;
     Pixel *new_image = new Pixel [ pixel_count ];
     assert(sizeof(Pixel) == 3);   // we make that assumption.
     if (fread(new_image, sizeof(Pixel), pixel_count, f) != pixel_count) {
@@ -279,10 +409,10 @@ public:
     return true;
   }
 
-  void Run() {
+  void Run() override {
     const int screen_height = offscreen_->height();
     const int screen_width = offscreen_->width();
-    while (running() && !interrupt_received) {
+    while (!interrupt_received) {
       {
         MutexLock l(&mutex_new_image_);
         if (new_image_.IsValid()) {
@@ -367,10 +497,10 @@ private:
 
 // Abelian sandpile
 // Contributed by: Vliedel
-class Sandpile : public ThreadedCanvasManipulator {
+class Sandpile : public DemoRunner {
 public:
   Sandpile(Canvas *m, int delay_ms=50)
-    : ThreadedCanvasManipulator(m), delay_ms_(delay_ms) {
+    : DemoRunner(m), delay_ms_(delay_ms) {
     width_ = canvas()->width() - 1; // We need an odd width
     height_ = canvas()->height() - 1; // We need an odd height
 
@@ -404,8 +534,8 @@ public:
     delete [] newValues_;
   }
 
-  void Run() {
-    while (running() && !interrupt_received) {
+  void Run() override {
+    while (!interrupt_received) {
       // Drop a sand grain in the centre
       values_[width_/2][height_/2]++;
       updateValues();
@@ -478,10 +608,10 @@ private:
 
 // Conway's game of life
 // Contributed by: Vliedel
-class GameLife : public ThreadedCanvasManipulator {
+class GameLife : public DemoRunner {
 public:
   GameLife(Canvas *m, int delay_ms=500, bool torus=true)
-    : ThreadedCanvasManipulator(m), delay_ms_(delay_ms), torus_(torus) {
+    : DemoRunner(m), delay_ms_(delay_ms), torus_(torus) {
     width_ = canvas()->width();
     height_ = canvas()->height();
 
@@ -533,8 +663,8 @@ public:
     delete [] newValues_;
   }
 
-  void Run() {
-    while (running() && !interrupt_received) {
+  void Run() override {
+    while (!interrupt_received) {
 
       updateValues();
 
@@ -632,10 +762,10 @@ private:
 
 // Langton's ant
 // Contributed by: Vliedel
-class Ant : public ThreadedCanvasManipulator {
+class Ant : public DemoRunner {
 public:
   Ant(Canvas *m, int delay_ms=500)
-    : ThreadedCanvasManipulator(m), delay_ms_(delay_ms) {
+    : DemoRunner(m), delay_ms_(delay_ms) {
     numColors_ = 4;
     width_ = canvas()->width();
     height_ = canvas()->height();
@@ -652,7 +782,7 @@ public:
     delete [] values_;
   }
 
-  void Run() {
+  void Run() override {
     antX_ = width_/2;
     antY_ = height_/2-3;
     antDir_ = 0;
@@ -663,7 +793,7 @@ public:
       }
     }
 
-    while (running() && !interrupt_received) {
+    while (!interrupt_received) {
       // LLRR
       switch (values_[antX_][antY_]) {
       case 0:
@@ -736,10 +866,10 @@ private:
 // Imitation of volume bars
 // Purely random height doesn't look realistic
 // Contributed by: Vliedel
-class VolumeBars : public ThreadedCanvasManipulator {
+class VolumeBars : public DemoRunner {
 public:
   VolumeBars(Canvas *m, int delay_ms=50, int numBars=8)
-    : ThreadedCanvasManipulator(m), delay_ms_(delay_ms),
+    : DemoRunner(m), delay_ms_(delay_ms),
       numBars_(numBars), t_(0) {
   }
 
@@ -749,7 +879,7 @@ public:
     delete [] barMeans_;
   }
 
-  void Run() {
+  void Run() override {
     const int width = canvas()->width();
     height_ = canvas()->height();
     barWidth_ = width/numBars_;
@@ -775,7 +905,7 @@ public:
     }
 
     // Start the loop
-    while (running() && !interrupt_received) {
+    while (!interrupt_received) {
       if (t_ % 8 == 0) {
         // Change the means
         for (int i=0; i<numBars_; ++i) {
@@ -845,10 +975,10 @@ private:
 /// Genetic Colors
 /// A genetic algorithm to evolve colors
 /// by bbhsu2 + anonymous
-class GeneticColors : public ThreadedCanvasManipulator {
+class GeneticColors : public DemoRunner {
 public:
   GeneticColors(Canvas *m, int delay_ms = 200)
-    : ThreadedCanvasManipulator(m), delay_ms_(delay_ms) {
+    : DemoRunner(m), delay_ms_(delay_ms) {
     width_ = canvas()->width();
     height_ = canvas()->height();
     popSize_ = width_ * height_;
@@ -864,9 +994,7 @@ public:
     delete [] parents_;
   }
 
-  static int rnd (int i) { return rand() % i; }
-
-  void Run() {
+  void Run() override {
     // Set a random target_
     target_ = rand() & 0xFFFFFF;
 
@@ -875,11 +1003,11 @@ public:
       children_[i].dna = rand() & 0xFFFFFF;
     }
 
-    while (running() && !interrupt_received) {
+    while (!interrupt_received) {
       swap();
       sort();
       mate();
-      std::random_shuffle (children_, children_ + popSize_, rnd);
+      std::shuffle (children_, children_ + popSize_, rng_);
 
       // Draw citizens to canvas
       for(int i=0; i < popSize_; i++) {
@@ -914,6 +1042,8 @@ private:
 
     int dna;
   };
+
+  std::mt19937 rng_;
 
   /// for sorting by fitness
   class comparer {
@@ -1024,12 +1154,12 @@ static int usage(const char *progname) {
   fprintf(stderr, "Options:\n");
   fprintf(stderr,
           "\t-D <demo-nr>              : Always needs to be set\n"
-          "\t-t <seconds>              : Run for these number of seconds, then exit.\n");
+          );
 
 
   rgb_matrix::PrintMatrixFlags(stderr);
 
-  fprintf(stderr, "Demos, choosen with -D\n");
+  fprintf(stderr, "Demos, chosen with -D\n");
   fprintf(stderr, "\t0  - some rotating square\n"
           "\t1  - forward scrolling an image (-m <scroll-ms>)\n"
           "\t2  - backward scrolling an image (-m <scroll-ms>)\n"
@@ -1041,14 +1171,14 @@ static int usage(const char *progname) {
           "\t8  - Langton's ant (-m <time-step-ms>)\n"
           "\t9  - Volume bars (-m <time-step-ms>)\n"
           "\t10 - Evolution of color (-m <time-step-ms>)\n"
-          "\t11 - Brightness pulse generator\n");
-  fprintf(stderr, "Example:\n\t%s -t 10 -D 1 runtext.ppm\n"
-          "Scrolls the runtext for 10 seconds\n", progname);
+          "\t11 - Brightness pulse generator\n"
+          "\t12 - Colorful rotating 3d cube\n");
+  fprintf(stderr, "Example:\n\t%s -D 1 runtext.ppm\n"
+          "Scrolls the runtext until Ctrl-C is pressed\n", progname);
   return 1;
 }
 
 int main(int argc, char *argv[]) {
-  int runtime_seconds = -1;
   int demo = -1;
   int scroll_ms = 30;
 
@@ -1068,59 +1198,14 @@ int main(int argc, char *argv[]) {
   }
 
   int opt;
-  while ((opt = getopt(argc, argv, "dD:t:r:P:c:p:b:m:LR:")) != -1) {
+  while ((opt = getopt(argc, argv, "dD:r:P:c:p:b:m:LR:")) != -1) {
     switch (opt) {
     case 'D':
       demo = atoi(optarg);
       break;
 
-    case 't':
-      runtime_seconds = atoi(optarg);
-      break;
-
     case 'm':
       scroll_ms = atoi(optarg);
-      break;
-
-      // These used to be options we understood, but deprecated now. Accept
-      // but don't mention in usage()
-    case 'R':
-      fprintf(stderr, "-R is deprecated. "
-              "Use --led-pixel-mapper=\"Rotate:%s\" instead.\n", optarg);
-      return 1;
-      break;
-
-    case 'L':
-      fprintf(stderr, "-L is deprecated. Use\n\t--led-pixel-mapper=\"U-mapper\" --led-chain=4\ninstead.\n");
-      return 1;
-      break;
-
-    case 'd':
-      runtime_opt.daemon = 1;
-      break;
-
-    case 'r':
-      fprintf(stderr, "Instead of deprecated -r, use --led-rows=%s instead.\n",
-              optarg);
-      matrix_options.rows = atoi(optarg);
-      break;
-
-    case 'P':
-      matrix_options.parallel = atoi(optarg);
-      break;
-
-    case 'c':
-      fprintf(stderr, "Instead of deprecated -c, use --led-chain=%s instead.\n",
-              optarg);
-      matrix_options.chain_length = atoi(optarg);
-      break;
-
-    case 'p':
-      matrix_options.pwm_bits = atoi(optarg);
-      break;
-
-    case 'b':
-      matrix_options.brightness = atoi(optarg);
       break;
 
     default: /* '?' */
@@ -1137,7 +1222,7 @@ int main(int argc, char *argv[]) {
     return usage(argv[0]);
   }
 
-  RGBMatrix *matrix = CreateMatrixFromOptions(matrix_options, runtime_opt);
+  RGBMatrix *matrix = RGBMatrix::CreateFromOptions(matrix_options, runtime_opt);
   if (matrix == NULL)
     return 1;
 
@@ -1146,96 +1231,87 @@ int main(int argc, char *argv[]) {
 
   Canvas *canvas = matrix;
 
-  // The ThreadedCanvasManipulator objects are filling
+  // The DemoRunner objects are filling
   // the matrix continuously.
-  ThreadedCanvasManipulator *image_gen = NULL;
+  DemoRunner *demo_runner = NULL;
   switch (demo) {
-  case 0:
-    image_gen = new RotatingBlockGenerator(canvas);
-    break;
+    case 0:
+      demo_runner = new RotatingBlockGenerator(canvas);
+      break;
 
-  case 1:
-  case 2:
-    if (demo_parameter) {
-      ImageScroller *scroller = new ImageScroller(matrix,
-                                                  demo == 1 ? 1 : -1,
-                                                  scroll_ms);
-      if (!scroller->LoadPPM(demo_parameter))
+    case 1:
+    case 2:
+      if (demo_parameter) {
+        ImageScroller *scroller = new ImageScroller(matrix,
+                                                    demo == 1 ? 1 : -1,
+                                                    scroll_ms);
+        if (!scroller->LoadPPM(demo_parameter))
+          return 1;
+        demo_runner = scroller;
+      } else {
+        fprintf(stderr, "Demo %d Requires PPM image as parameter\n", demo);
         return 1;
-      image_gen = scroller;
-    } else {
-      fprintf(stderr, "Demo %d Requires PPM image as parameter\n", demo);
-      return 1;
-    }
-    break;
+      }
+      break;
 
-  case 3:
-    image_gen = new SimpleSquare(canvas);
-    break;
+    case 3:
+      demo_runner = new SimpleSquare(canvas);
+      break;
 
-  case 4:
-    image_gen = new ColorPulseGenerator(matrix);
-    break;
+    case 4:
+      demo_runner = new ColorPulseGenerator(matrix);
+      break;
 
-  case 5:
-    image_gen = new GrayScaleBlock(canvas);
-    break;
+    case 5:
+      demo_runner = new GrayScaleBlock(canvas);
+      break;
 
-  case 6:
-    image_gen = new Sandpile(canvas, scroll_ms);
-    break;
+    case 6:
+      demo_runner = new Sandpile(canvas, scroll_ms);
+      break;
 
-  case 7:
-    image_gen = new GameLife(canvas, scroll_ms);
-    break;
+    case 7:
+      demo_runner = new GameLife(canvas, scroll_ms);
+      break;
 
-  case 8:
-    image_gen = new Ant(canvas, scroll_ms);
-    break;
+    case 8:
+      demo_runner = new Ant(canvas, scroll_ms);
+      break;
 
-  case 9:
-    image_gen = new VolumeBars(canvas, scroll_ms, canvas->width()/2);
-    break;
+    case 9:
+      demo_runner = new VolumeBars(canvas, scroll_ms, canvas->width()/2);
+      break;
 
-  case 10:
-    image_gen = new GeneticColors(canvas, scroll_ms);
-    break;
+    case 10:
+      demo_runner = new GeneticColors(canvas, scroll_ms);
+      break;
 
-  case 11:
-    image_gen = new BrightnessPulseGenerator(matrix);
-    break;
+    case 11:
+      demo_runner = new BrightnessPulseGenerator(matrix);
+      break;
+      
+    case 12:
+      demo_runner = new WireCube(canvas);
+      break;
   }
 
-  if (image_gen == NULL)
+  if (demo_runner == NULL)
     return usage(argv[0]);
 
   // Set up an interrupt handler to be able to stop animations while they go
-  // on. Note, each demo tests for while (running() && !interrupt_received) {},
+  // on. Each demo tests for while (!interrupt_received) {},
   // so they exit as soon as they get a signal.
   signal(SIGTERM, InterruptHandler);
   signal(SIGINT, InterruptHandler);
 
-  // Image generating demo is crated. Now start the thread.
-  image_gen->Start();
+  printf("Press <CTRL-C> to exit and reset LEDs\n");
 
-  // Now, the image generation runs in the background. We can do arbitrary
-  // things here in parallel. In this demo, we're essentially just
-  // waiting for one of the conditions to exit.
-  if (runtime_seconds > 0) {
-    sleep(runtime_seconds);
-  } else {
-    // The
-    printf("Press <CTRL-C> to exit and reset LEDs\n");
-    while (!interrupt_received) {
-      sleep(1); // Time doesn't really matter. The syscall will be interrupted.
-    }
-  }
+  // Now, run our particular demo; it will exit when it sees interrupt_received.
+  demo_runner->Run();
 
-  // Stop image generating thread. The delete triggers
-  delete image_gen;
+  delete demo_runner;
   delete canvas;
 
-  printf("\%s. Exiting.\n",
-         interrupt_received ? "Received CTRL-C" : "Timeout reached");
+  printf("Received CTRL-C. Exiting.\n");
   return 0;
 }

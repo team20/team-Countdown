@@ -11,15 +11,22 @@
 // These abstractions are used in util/led-image-viewer.cc to read and
 // write such animations to disk. It is also used in util/video-viewer.cc
 // to write a version to disk that then can be played with the led-image-viewer.
+
+#ifndef RPI_CONTENT_STREAMER_H
+#define RPI_CONTENT_STREAMER_H
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <sys/types.h>
 
 #include <string>
 
 namespace rgb_matrix {
 class FrameCanvas;
 
-// An abstraction of a data stream.
+// An abstraction of a data stream. Two implementations exist for files and
+// an in-memory representation, but this allows your own implementation, e.g.
+// reading from a socket.
 class StreamIO {
 public:
   virtual ~StreamIO() {}
@@ -27,7 +34,8 @@ public:
   // Rewind stream.
   virtual void Rewind() = 0;
 
-  // Read bytes into buffer. Similar to Posix behavior that allows short reads.
+  // Read bytes into buffer at current position of stream.
+  // Similar to Posix behavior that allows short reads.
   virtual ssize_t Read(void *buf, size_t count) = 0;
 
   // Write bytes from buffer. Similar to Posix behavior that allows short
@@ -40,23 +48,45 @@ public:
   explicit FileStreamIO(int fd);
   ~FileStreamIO();
 
-  virtual void Rewind();
-  virtual ssize_t Read(void *buf, size_t count);
-  virtual ssize_t Append(const void *buf, size_t count);
+  void Rewind() final;
+  ssize_t Read(void *buf, size_t count) final;
+  ssize_t Append(const void *buf, size_t count) final;
 
 private:
   const int fd_;
 };
 
+// Storing a stream in memory. Owns the memory.
 class MemStreamIO : public StreamIO {
 public:
-  virtual void Rewind();
-  virtual ssize_t Read(void *buf, size_t count);
-  virtual ssize_t Append(const void *buf, size_t count);
+  void Rewind() final;
+  ssize_t Read(void *buf, size_t count) final;
+  ssize_t Append(const void *buf, size_t count) final;
 
 private:
   std::string buffer_;  // super simplistic.
-  size_t pos_;
+  size_t pos_ = 0;
+};
+
+// Just a view around the memory, possibly a memory mapped file.
+class MemMapViewInput : public StreamIO {
+public:
+  MemMapViewInput(int fd);
+  ~MemMapViewInput();
+
+  // Since mmmap() might fail, this tells us if it was successful.
+  bool IsInitialized() const { return buffer_ != nullptr; }
+
+  void Rewind() final;
+  ssize_t Read(void *buf, size_t count) final;
+
+  // No append, this is purely read-only.
+  ssize_t Append(const void *buf, size_t count) final { return -1; }
+
+private:
+  char *buffer_;
+  char *end_;
+  char *pos_;
 };
 
 class StreamWriter {
@@ -81,6 +111,10 @@ public:
   StreamReader(StreamIO *io);
   ~StreamReader();
 
+  // Owns its frame buffer; copying would free it twice.
+  StreamReader(const StreamReader &) = delete;
+  StreamReader &operator=(const StreamReader &) = delete;
+
   // Go back to the beginning.
   void Rewind();
 
@@ -97,9 +131,12 @@ private:
   bool ReadFileHeader(const FrameCanvas &frame);
 
   StreamIO *io_;
-  size_t buf_size_;
+  size_t frame_buf_size_;
   State state_;
 
-  char *buffer_;
+  char *header_frame_buffer_;
 };
-}
+// Helpers for external C bridge wrappers.
+bool StreamIOIsCompatibleWithCanvas(StreamIO* io, FrameCanvas* frame);
+}  // namespace rgb_matrix
+#endif

@@ -3,11 +3,24 @@
 # So
 #   -lrgbmatrix
 ##
+include ../config.mk
+
 OBJECTS=gpio.o led-matrix.o options-initialize.o framebuffer.o \
-        thread.o bdf-font.o graphics.o transformer.o led-matrix-c.o \
-	hardware-mapping.o content-streamer.o pixel-mapper.o multiplex-mappers.o
+	thread.o bdf-font.o graphics.o led-matrix-c.o hardware-mapping.o \
+	pixel-mapper.o multiplex-mappers.o frame-sequence.o \
+	content-streamer.o content-streamer-c.o frame-sequence-c.o \
+	rp1/rp1_pio_backend.o rp1/rp1_pio_support.o rp1/rp1_rio_backend.o
 
 TARGET=librgbmatrix
+
+###
+# After you change any of the following DEFINES, make sure to 'make' again.
+#
+# ###########      NOTE     ###########
+# all of these options can now can be set programmatically and
+# via command line flags as well. No real need to change them in the Makefile.
+# (So be prepared for these to be removed at some point)
+###
 
 # There are several different pinouts for various breakout boards that uses
 # this library. If you are using the described pinout in the toplevel README.md
@@ -25,15 +38,6 @@ TARGET=librgbmatrix
 #   classic            # (deprecated) Classic Pi1/2/. Not used anymore.
 #   classic-pi1        # (deprecated) Classic pinout on Rasperry Pi 1
 HARDWARE_DESC?=regular
-
-###
-# After you change any of the following DEFINES, make sure to 'make' again.
-#
-# ###########      NOTE     ###########
-# all of these options can now can be set programmatically and
-# via command line flags as well. No real need to change them in the Makefile.
-# (So be prepared for these to be removed at some point)
-###
 
 # If you see that your display is inverse, you might have a matrix variant
 # has uses inverse logic for the RGB bits. In that case: uncomment this.
@@ -96,13 +100,6 @@ HARDWARE_DESC?=regular
 # Flag: --led-no-hardware-pulses
 #DEFINES+=-DDISABLE_HARDWARE_PULSES
 
-# If defined, remove deprecated transformers from the API.
-# This will eventually be enabled by default and at some point the code
-# in question will be removed from the code-base, so don't use transformers.
-# Use PixelMappers instead (include/pixel-mapper.h)
-#DEFINES+=-DREMOVE_DEPRECATED_TRANSFORMERS
-
-# --- EXPERIMENTAL --
 # This allows to fix the refresh rate to a particular refresh time in
 # microseconds.
 #
@@ -132,7 +129,23 @@ HARDWARE_DESC?=regular
 # You can play with value a little and reduce until you find a good balance
 # between refresh rate (which is reduce the higher this value is) and
 # flicker suppression (which is better with higher values).
+# Flag: --led-limit-refresh
 #DEFINES+=-DFIXED_FRAME_MICROSECONDS=5000
+
+# When limiting refrash rate, a CPU core is busy waiting to get accurate
+# timing. On single board systems, this results in an unresponsive system.
+# By disabling busy waiting, CPU cycles are freed up, leading to a more
+# responsive system at the cost of slightly less accurate frame timing.
+# Flag: --led-no-busy-waiting
+#DEFINES+=-DDISABLE_BUSY_WAITING
+
+# Enable wide 64 bit GPIO offered with the compute module.
+# This will use more memory to internally represent the frame buffer, so
+# caches can't be utilized as much.
+# So only switch this on if you really use the compute module and use more
+# than 3 parallel chains.
+# (this is untested right now, waiting for hardware to arrive for testing)
+#DEFINES+=-DENABLE_WIDE_GPIO_COMPUTE_MODULE
 
 # ---- Pinout options for hardware variants; usually no change needed here ----
 
@@ -162,8 +175,11 @@ DEFINES+=$(USER_DEFINES)
 
 DEFINES+=-DDEFAULT_HARDWARE='"$(HARDWARE_DESC)"'
 INCDIR=../include
-CFLAGS=-Wall -O3 -g -fPIC $(DEFINES) -Wextra -Wno-unused-parameter
-CXXFLAGS=$(CFLAGS) -fno-exceptions
+RP1_PIO_VENDOR_DIR=./rp1/rp1_pio_vendor
+RP1_PIO_INCLUDES=-I$(RP1_PIO_VENDOR_DIR)/piolib/include -I$(RP1_PIO_VENDOR_DIR)/include
+
+CFLAGS=-W -Wall -Wextra -Wno-unused-parameter -O3 $(CPU_ARCH_FLAGS) $(LTO_FLAGS) -g -fPIC $(DEFINES) $(RP1_PIO_INCLUDES)
+CXXFLAGS=$(CFLAGS) -fno-exceptions -std=c++11
 
 all : $(TARGET).a $(TARGET).so.1
 
@@ -171,12 +187,11 @@ $(TARGET).a : $(OBJECTS)
 	$(AR) rcs $@ $^
 
 $(TARGET).so.1 : $(OBJECTS)
-	$(CXX) -shared -Wl,-soname,$@ -o $@ $^ -lpthread  -lrt -lm -lpthread
+	$(CXX) -shared $(LTO_FLAGS) -Wl,-soname,$@ -o $@ $^ -lpthread  -lrt -lm -lpthread
 
 led-matrix.o: led-matrix.cc $(INCDIR)/led-matrix.h
 thread.o : thread.cc $(INCDIR)/thread.h
 framebuffer.o: framebuffer.cc framebuffer-internal.h
-multiplex-transformers.o : multiplex-transformers.cc multiplex-transformers-internal.h
 graphics.o: graphics.cc utf8-internal.h
 
 %.o : %.cc compiler-flags
@@ -188,7 +203,30 @@ graphics.o: graphics.cc utf8-internal.h
 clean:
 	rm -f $(OBJECTS) $(TARGET).a $(TARGET).so.1
 
+# `sudo make install` puts the shared library, the headers and a pkg-config
+# file under PREFIX, so other projects can build against it with
+#   pkg-config --cflags --libs rgbmatrix
+# Headers go to $(INCLUDEDIR)/rgbmatrix/ since names like graphics.h are generic.
+PREFIX?=/usr/local
+LIBDIR?=$(PREFIX)/lib
+INCLUDEDIR?=$(PREFIX)/include
+PKGCONFIGDIR?=$(LIBDIR)/pkgconfig
+
+install: $(TARGET).so.1
+	install -d $(DESTDIR)$(LIBDIR) $(DESTDIR)$(INCLUDEDIR)/rgbmatrix $(DESTDIR)$(PKGCONFIGDIR)
+	install -m 644 $(TARGET).so.1 $(DESTDIR)$(LIBDIR)/
+	ln -sf $(TARGET).so.1 $(DESTDIR)$(LIBDIR)/$(TARGET).so
+	install -m 644 $(INCDIR)/*.h $(DESTDIR)$(INCLUDEDIR)/rgbmatrix/
+	sed -e 's|@PREFIX@|$(PREFIX)|' -e 's|@LIBDIR@|$(LIBDIR)|' \
+	    -e 's|@INCLUDEDIR@|$(INCLUDEDIR)|' rgbmatrix.pc.in > $(DESTDIR)$(PKGCONFIGDIR)/rgbmatrix.pc
+	if [ -z "$(DESTDIR)" ]; then ldconfig || true; fi
+
+uninstall:
+	rm -f $(DESTDIR)$(LIBDIR)/$(TARGET).so.1 $(DESTDIR)$(LIBDIR)/$(TARGET).so
+	rm -rf $(DESTDIR)$(INCLUDEDIR)/rgbmatrix
+	rm -f $(DESTDIR)$(PKGCONFIGDIR)/rgbmatrix.pc
+
 compiler-flags: FORCE
 	@echo '$(CXX) $(CXXFLAGS)' | cmp -s - $@ || echo '$(CXX) $(CXXFLAGS)' > $@
 
-.PHONY: FORCE
+.PHONY: FORCE install uninstall

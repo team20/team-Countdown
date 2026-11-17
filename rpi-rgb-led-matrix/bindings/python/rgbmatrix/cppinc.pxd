@@ -22,7 +22,7 @@ cdef extern from "led-matrix.h" namespace "rgb_matrix":
         void SetBrightness(uint8_t)
         uint8_t brightness()
         FrameCanvas *CreateFrameCanvas()
-        FrameCanvas *SwapOnVSync(FrameCanvas*)
+        FrameCanvas *SwapOnVSync(FrameCanvas*, uint8_t)
 
     cdef cppclass FrameCanvas(Canvas):
         bool SetPWMBits(uint8_t)
@@ -33,8 +33,12 @@ cdef extern from "led-matrix.h" namespace "rgb_matrix":
     struct RuntimeOptions:
       RuntimeOptions() except +
       int gpio_slowdown
+      int rp1_pio
       int daemon
       int drop_privileges
+      bool do_gpio_init
+      const char *drop_priv_user
+      const char *drop_priv_group
 
 
     RGBMatrix *CreateMatrixFromOptions(Options &options, RuntimeOptions runtime_options)
@@ -58,6 +62,7 @@ cdef extern from "led-matrix.h" namespace "rgb_matrix::RGBMatrix":
         int row_address_type
         int multiplexing
         int pwm_dither_bits
+        int limit_refresh_rate_hz
 
         bool disable_hardware_pulsing
         bool show_refresh_rate
@@ -65,6 +70,7 @@ cdef extern from "led-matrix.h" namespace "rgb_matrix::RGBMatrix":
 
         const char *led_rgb_sequence
         const char *pixel_mapper_config
+        const char *panel_type
 
 cdef extern from "graphics.h" namespace "rgb_matrix":
     cdef struct Color:
@@ -77,6 +83,7 @@ cdef extern from "graphics.h" namespace "rgb_matrix":
         Font() except +
         bool LoadFont(const char*)
         int height()
+        int width()
         int baseline()
         int CharacterWidth(uint32_t)
         int DrawGlyph(Canvas*, int, int, const Color, uint32_t);
